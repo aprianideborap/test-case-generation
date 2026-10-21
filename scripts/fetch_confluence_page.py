@@ -38,39 +38,20 @@ except ImportError:
 DEFAULT_CONFIG = os.path.join(os.path.dirname(__file__), "..", "config.json")
 
 
-USER_CONFIG = os.path.expanduser("~/.config/confluence/config.json")
-DEFAULT_BASE_URL = "https://confluence.shopee.io"
-
-MISSING_TOKEN_MESSAGE = (
-    "TOKEN_MISSING: no Confluence Personal Access Token found.\n"
-    "Looked in: $CONFLUENCE_TOKEN, {user}, {local}.\n"
-    "To create one: confluence.shopee.io -> profile avatar -> Personal Access Tokens "
-    "-> Create token. Then either export CONFLUENCE_TOKEN=<token>, or save it in "
-    "{user} as {{\"base_url\": \"{base}\", \"token\": \"<token>\"}} (chmod 600)."
-)
-
-
 def load_config(config_path):
-    """Token lookup order: env var, user-level config, then the local config.json."""
-    env_token = os.environ.get("CONFLUENCE_TOKEN", "").strip()
-    if env_token:
-        base = os.environ.get("CONFLUENCE_BASE_URL", DEFAULT_BASE_URL)
-        return base.rstrip("/"), env_token
-
-    for path in (USER_CONFIG, config_path):
-        if not os.path.exists(path):
-            continue
-        with open(path, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-        token = cfg.get("token", "")
-        if token and not token.startswith("<"):
-            return cfg.get("base_url", DEFAULT_BASE_URL).rstrip("/"), token
-
-    sys.exit(
-        MISSING_TOKEN_MESSAGE.format(
-            user=USER_CONFIG, local=os.path.abspath(config_path), base=DEFAULT_BASE_URL
+    if not os.path.exists(config_path):
+        sys.exit(
+            f"Config file not found: {config_path}\n"
+            "Copy config.example.json to config.json (same folder) and fill in your "
+            "Confluence base_url and Personal Access Token."
         )
-    )
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    base_url = cfg["base_url"].rstrip("/")
+    token = cfg["token"]
+    if not token or token.startswith("<"):
+        sys.exit(f"config.json still has a placeholder token — fill in a real Personal Access Token.")
+    return base_url, token
 
 
 def extract_page_id(url):
@@ -122,7 +103,7 @@ def fetch_page(base_url, token, url):
 
     if resp.status_code in (401, 403):
         sys.exit(
-            f"Confluence returned {resp.status_code} — the Personal Access Token "
+            f"Confluence returned {resp.status_code} — the Personal Access Token in config.json "
             "is missing, expired, or lacks permission to view this page."
         )
     if resp.status_code == 404:

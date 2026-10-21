@@ -1,6 +1,6 @@
 ---
 name: test-case-generation
-description: Generate a QA test-case spreadsheet from a PRD Confluence link and a TD (Technical Design) Confluence link. Use this whenever the user pastes Confluence link(s) (or asks to generate/write test cases "from this PRD/TD/spec/link/images/files") and wants test cases produced from them. Also trigger on requests like "buatkan test case dari confluence ini", "generate test case untuk fitur ini", or any ask to turn Confluence requirements/design docs into test cases, even if they don't name the output format explicitly. Produces both E2E test cases (grounded in the PRD) and API test cases (grounded in the TD) with thorough edge-case and negative-case coverage. Always fetch actual page content via the bundled Confluence REST API script rather than guessing from a URL or title alone.
+description: Generate a QA test-case spreadsheet from a PRD Confluence link and a TD (Technical Design) Confluence link. Use this whenever the user pastes Confluence link(s) (or asks to generate/write test cases "from this PRD/TD/spec/link") and wants test cases produced from them. Also trigger on requests like "buatkan test case dari confluence ini", "generate test case untuk fitur ini", or any ask to turn Confluence requirements/design docs into test cases, even if they don't name the output format explicitly. Produces both E2E test cases (grounded in the PRD) and API test cases (grounded in the TD) with thorough edge-case and negative-case coverage. Always fetch actual page content via the bundled Confluence REST API script rather than guessing from a URL or title alone.
 ---
 
 # Test Case Generation from Confluence (PRD + TD)
@@ -25,33 +25,17 @@ actually satisfies the product requirement.
 ## One-time setup
 
 The fetch script authenticates to `confluence.shopee.io` with a Personal
-Access Token (Server/Data Center Bearer auth). It looks for the token in this
-order: the `CONFLUENCE_TOKEN` env var (optionally `CONFLUENCE_BASE_URL`),
-then `~/.config/confluence/config.json`, then a gitignored `config.json` in
-the skill folder (copy of `config.example.json`). Never ship a real token
-inside the skill folder.
+Access Token (Server/Data Center Bearer auth), read from a local config file
+that is gitignored so it never gets committed:
 
-**If no token is found** the script exits with a `TOKEN_MISSING` message.
-Don't guess at the page content. Instead, tell the user, in their language:
-1. The token isn't set up yet, and where it looked.
-2. How to create one: confluence.shopee.io -> profile avatar -> Personal
-   Access Tokens -> Create token (suggest a short expiry).
-3. They can either set it themselves (`export CONFLUENCE_TOKEN=...` or the
-   user-level config file), or, if they're in a chat environment with no
-   local shell access, paste it into the chat.
+```bash
+cp config.example.json config.json
+# then edit config.json and paste a real Personal Access Token
+# (confluence.shopee.io -> profile avatar -> Personal Access Tokens -> Create token)
+```
 
-**No-token fallback:** the user can instead export the PRD/TD from Confluence
-(Tools -> Export to PDF/Word) or paste the page text, and attach them to the
-chat along with any screenshots. Read those attachments directly and skip the
-fetch script; everything else in the workflow (images as context, conflict
-notes, edge cases) stays the same. Offer this whenever the token can't be
-set up or Confluence is unreachable from the environment.
-
-If the user pastes a token: use it only for the fetch, by passing it as the
-`CONFLUENCE_TOKEN` env var on the command (or a temp config in the scratchpad
-directory, deleted afterward). Never write it into the skill folder, never
-echo it back in replies or the spreadsheet, and remind them to revoke it
-when they're done since it now exists in the chat history.
+If `config.json` is missing or still has the placeholder token, the fetch
+script fails fast with a clear message rather than silently returning nothing.
 
 ## Workflow
 
