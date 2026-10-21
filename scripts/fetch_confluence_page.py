@@ -5,7 +5,7 @@ Bearer-token auth) and print it as readable text/markdown. Optionally
 downloads every image embedded in the page body (screenshots, flow diagrams)
 so they can be viewed directly.
 
-Reads connection details from a local config file (default: ../config.json,
+Reads credentials from CONFLUENCE_TOKEN / CONFLUENCE_BASE_URL env vars, or a local config file (default: ../config.json,
 gitignored) shaped like:
     {
         "base_url": "https://confluence.shopee.io",
@@ -21,6 +21,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import sys
 from urllib.parse import unquote, urlparse, parse_qs
 
@@ -31,27 +32,51 @@ except ImportError:
     sys.exit(
         "requests and beautifulsoup4 are required but not installed.\n"
         "If pip install fails with an 'externally-managed-environment' error, use a venv:\n"
-        "  python3 -m venv /tmp/tcgen-venv && /tmp/tcgen-venv/bin/pip install --quiet requests beautifulsoup4\n"
-        "  /tmp/tcgen-venv/bin/python3 fetch_confluence_page.py ...\n"
+        "  V=$(mktemp -d)/venv && python3 -m venv $V && $V/bin/pip install --quiet requests beautifulsoup4\n"
+        "  $V/bin/python3 fetch_confluence_page.py ...\n"
     )
 
 DEFAULT_CONFIG = os.path.join(os.path.dirname(__file__), "..", "config.json")
 
 
 def load_config(config_path):
-    if not os.path.exists(config_path):
+    """Token precedence: CONFLUENCE_TOKEN env var, then config.json.
+    base_url precedence: CONFLUENCE_BASE_URL env var, then config.json."""
+    cfg = {}
+    if os.path.exists(config_path):
+        mode = os.stat(config_path).st_mode
+        if mode & (stat.S_IRWXG | stat.S_IRWXO):
+            print(
+                f"Warning: {config_path} is readable by other users; run: chmod 600 {config_path}",
+                file=sys.stderr,
+            )
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+
+    base_url = (os.environ.get("CONFLUENCE_BASE_URL") or cfg.get("base_url", "")).rstrip("/")
+    token = os.environ.get("CONFLUENCE_TOKEN") or cfg.get("token", "")
+    if not base_url or not token or token.startswith("<"):
         sys.exit(
-            f"Config file not found: {config_path}\n"
-            "Copy config.example.json to config.json (same folder) and fill in your "
-            "Confluence base_url and Personal Access Token."
+            "Confluence credentials not found. Set CONFLUENCE_TOKEN (and optionally "
+            "CONFLUENCE_BASE_URL) in your environment, or copy config.example.json to "
+            "config.json and fill in a real Personal Access Token."
         )
-    with open(config_path, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
-    base_url = cfg["base_url"].rstrip("/")
-    token = cfg["token"]
-    if not token or token.startswith("<"):
-        sys.exit(f"config.json still has a placeholder token — fill in a real Personal Access Token.")
+    if urlparse(base_url).scheme != "https":
+        sys.exit("base_url must use https:// — refusing to send the token over plain HTTP.")
     return base_url, token
+
+
+def same_origin(base_url, url):
+    a, b = urlparse(base_url), urlparse(url)
+    return (a.scheme, a.netloc) == (b.scheme, b.netloc)
+
+
+def safe_filename(name):
+    """Strip any directory components / odd characters from an
+    attacker-controllable filename so it can't escape the images dir."""
+    name = os.path.basename(name.replace("\\", "/").split("?")[0])
+    name = re.sub(r"[^A-Za-z0-9._ -]", "_", name).lstrip(".")
+    return name[:120] or "image"
 
 
 def extract_page_id(url):
@@ -75,6 +100,8 @@ def extract_space_and_title(url):
 
 
 def fetch_page(base_url, token, url):
+    if not same_origin(base_url, url):
+        sys.exit(f"Refusing to fetch {url}: it is not on the configured Confluence host ({base_url}).")
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     page_id = extract_page_id(url)
     try:
@@ -238,11 +265,26 @@ def list_attachments(base_url, token, page_id):
     return resp.json().get("results", [])
 
 
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+
 def download_file(url, dest_path, headers=None):
-    resp = requests.get(url, headers=headers or {}, timeout=60)
-    resp.raise_for_status()
-    with open(dest_path, "wb") as f:
-        f.write(resp.content)
+    # Never follow redirects: the Authorization header must only go to the
+    # Confluence host, and a redirect could point anywhere.
+    with requests.get(url, headers=headers or {}, timeout=60, stream=True, allow_redirects=False) as resp:
+        resp.raise_for_status()
+        if resp.is_redirect:
+            raise requests.exceptions.RequestException("unexpected redirect")
+        ctype = resp.headers.get("Content-Type", "")
+        if not ctype.lower().startswith("image/"):
+            raise requests.exceptions.RequestException(f"not an image (Content-Type: {ctype or 'missing'})")
+        total = 0
+        with open(dest_path, "wb") as f:
+            for chunk in resp.iter_content(65536):
+                total += len(chunk)
+                if total > MAX_IMAGE_BYTES:
+                    raise requests.exceptions.RequestException("image exceeds 20 MB limit")
+                f.write(chunk)
 
 
 def download_images(base_url, token, page_id, image_refs, images_dir):
@@ -268,11 +310,16 @@ def download_images(base_url, token, page_id, image_refs, images_dir):
                     print(f"Warning: attachment '{value}' not found on this page, skipping.", file=sys.stderr)
                     continue
                 url = link if link.startswith("http") else base_url + link
-                dest = os.path.join(images_dir, os.path.basename(value))
+                if not same_origin(base_url, url):
+                    print(f"Warning: attachment '{value}' points off-host, skipping.", file=sys.stderr)
+                    continue
+                dest = os.path.join(images_dir, safe_filename(value))
                 download_file(url, dest, headers=auth_headers)
             else:
-                dest = os.path.join(images_dir, os.path.basename(value.split("?")[0]) or "external-image")
-                download_file(value, dest)
+                # External image URLs come from untrusted page content; fetching
+                # them would allow SSRF / tracking, so they are never downloaded.
+                print(f"Skipped external image (not downloaded): {value}", file=sys.stderr)
+                continue
             downloaded.append((value, dest))
         except requests.exceptions.RequestException as e:
             print(f"Warning: failed to download image '{value}': {e}", file=sys.stderr)
