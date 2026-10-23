@@ -1,0 +1,19 @@
+# Secrets (real Confluence token lives here; use config.example.json as the template)
+config.json
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Generated output and downloaded Confluence images
+*.xlsx
+*-images/
