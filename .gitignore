@@ -1,4 +1,5 @@
 # Secrets (real Confluence token lives here; use config.example.json as the template)
+config.json
 .env
 .env.*
 
