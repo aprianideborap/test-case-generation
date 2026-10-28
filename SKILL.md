@@ -1,5 +1,5 @@
 ---
-name: test--case--generation
+name: test-case-generation
 description: Generate a QA test-case spreadsheet from a PRD Confluence link and a TD (Technical Design) Confluence link. Use this whenever the user pastes Confluence link(s) (or asks to generate/write test cases "from this PRD/TD/spec/link") and wants test cases produced from them. Also trigger on requests like "buatkan test case dari confluence ini", "generate test case untuk fitur ini", or any ask to turn Confluence requirements/design docs into test cases, even if they don't name the output format explicitly. Produces both E2E test cases (grounded in the PRD) and API test cases (grounded in the TD) with thorough edge-case and negative-case coverage. Always fetch actual page content via the bundled Confluence REST API script rather than guessing from a URL or title alone.
 ---
 
