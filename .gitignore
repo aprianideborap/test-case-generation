@@ -15,5 +15,4 @@ __pycache__/
 venv/
 
 # Generated output and downloaded Confluence images
-*.xlsx
 *-images/
