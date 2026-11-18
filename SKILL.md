@@ -189,6 +189,66 @@ fast with a clear message rather than silently returning nothing.
    docs/images, and use the real limit values (e.g. "51 characters" when the
    max is 50) in the case.
 
+   **Consolidate repeated logic before drafting — review, don't re-create.**
+   PRDs and TDs routinely state the same rule more than once: in the overview
+   and again in a flow section, in an acceptance-criteria list and again in a
+   table, per-platform sections repeating the same behavior, several endpoints
+   sharing the same auth/validation/error rules, or a "Notes" section
+   restating something already specified. Writing a new case every time a rule
+   is mentioned produces duplicate, near-duplicate, and contradictory cases.
+   Prevent this by building a coverage map as you go:
+
+   1. **Build a logic inventory first.** Before writing any case, list each
+      distinct rule/behavior once (e.g. "username max 50 chars", "token
+      expired → 401", "Skills menu opens Skills page"), noting every place in
+      the PRD/TD/images where it appears. One rule = one inventory entry, no
+      matter how many times it is repeated.
+   2. **Check the existing cases before adding any new one.** For each
+      inventory entry, search the cases you have already drafted in this
+      session (and any existing test-case file/sheet the user provides or
+      references) for one that already exercises that rule — match on the
+      behavior and the concrete condition, not just on the wording or the
+      test case name. Also check related cases: same feature, same
+      endpoint, same field, same screen, or same state.
+   3. **Decide per entry — in this order:**
+      - **Already covered** (an existing case verifies the same rule with the
+        same condition and the same expected result): do **not** add a new
+        case. Keep the existing one as is. If the repeated mention is in a
+        different PRD/TD section, you may append a reference to it in the
+        existing case's `remarks` (e.g. "Also stated in PRD §4.2; TD
+        'Validation' table").
+      - **Partially covered** (an existing case touches the rule but misses a
+        condition, boundary value, platform, role, error code, field, or
+        expected-result detail that the repeated mention adds): **update the
+        existing case** — extend its steps/expected result, or add the
+        missing platform/field — rather than creating a sibling case. Only
+        split into a new case when merging would make one case verify two
+        independent outcomes (a case should still have one clear purpose).
+      - **Not covered** (no existing case relates to it): create a new case.
+      Prefer keeping and updating over creating. Never delete or rewrite an
+      existing case's intent just to fit a new mention; if the repeated
+      statements actually **contradict** each other, don't pick silently —
+      keep one case following the PRD (see "PRD wins on conflicts" above) and
+      record the contradiction in `remarks` and in the final summary.
+   4. **Treat rules shared across endpoints/screens as one rule, tested where
+      it matters.** If the same validation, auth, or error behavior applies
+      to many endpoints or screens, don't clone an identical case for each
+      mention. Write it once for a representative target and note in
+      `remarks` which others share it — unless the TD shows the behavior
+      differs per endpoint/screen (different limits, error codes, or roles),
+      in which case each difference is a distinct rule and gets its own case.
+   5. **Do a final de-duplication pass** over the whole draft before saving
+      the JSON: look for cases with the same precondition + steps +
+      expected result, or the same endpoint + payload + status code, and
+      merge them. Make sure `no` values are renumbered sequentially after
+      merges.
+
+   When an existing spreadsheet of test cases is provided (e.g. an earlier
+   version of this feature's .xlsx, or cases from a previous PRD/TD),
+   load it and run the same check against it: keep cases that are still
+   valid, update the ones with gaps, and only add cases for logic that isn't
+   covered yet. Don't regenerate the whole file from scratch.
+
    **Preconditions must be concrete, not generic.** Write exactly the state
    the tester must set up before step 1 for *that* case, e.g. "User is logged
    in as a Workspace Admin; no skill named 'demo-skill' exists yet; a public
@@ -245,6 +305,9 @@ fast with a clear message rather than silently returning nothing.
      generates cases, it doesn't run them.
    - Write `steps` and `expected_result` as newline-separated, numbered/bulleted
      text — that's what renders cleanly in the spreadsheet cell.
+   - Every case must trace to a distinct rule in your logic inventory. If you
+     can't say what rule a case verifies that no other case already does,
+     drop or merge it.
    - Omit the `"e2e"` or `"api"` key entirely (or leave it an empty list) if
      that test type genuinely doesn't apply (e.g. no TD was given).
    - Save this JSON to a temp file (e.g. in the scratchpad directory).
@@ -286,7 +349,11 @@ fast with a clear message rather than silently returning nothing.
    factored in and how many UI/flow cases came from them, a list of every
    PRD-vs-image/TD conflict found (also noted in Remarks), and which
    edge/negative scenarios were covered), so the user can quickly sanity-check
-   coverage against the source docs.
+   coverage against the source docs. Also report the consolidation outcome:
+   which rules were repeated across the docs and were folded into an existing
+   case instead of getting a new one, which existing cases were updated to
+   cover an extra condition, and any repeated statements that contradicted
+   each other.
 
 ## Notes
 
